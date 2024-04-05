@@ -76,7 +76,7 @@ pub mod vba;
 use serde::de::{Deserialize, DeserializeOwned, Deserializer};
 use std::borrow::Cow;
 use std::cmp::{max, min};
-use std::fmt;
+use std::fmt::{self, Display};
 use std::fs::File;
 use std::io::{BufReader, Read, Seek};
 use std::ops::{Index, IndexMut};
@@ -665,6 +665,16 @@ impl<T: CellType> Range<T> {
         RangeDeserializerBuilder::new().from_range(self)
     }
 
+    ///
+    /// Create a new `Range` from excel coordinate discriminator.
+    ///
+    pub fn range_from_coords(&self, start: &str, end: &str) -> Result<Range<T>, Error> {
+        Ok(self.range(
+            Coordinate::try_from(start)?.into(),
+            Coordinate::try_from(end)?.into(),
+        ))
+    }
+
     /// Build a new `Range` out of this range
     ///
     /// # Remarks
@@ -771,6 +781,207 @@ impl<T: CellType + fmt::Display> Range<T> {
         self.rows()
             .next()
             .map(|row| row.iter().map(ToString::to_string).collect())
+    }
+}
+
+///
+/// Excel String to Coordinate:
+///
+/// ```rust
+/// use calamine::{Coordinate, Error};
+///
+/// let coord: Result<Coordinate, Error> = "AB204".try_into();
+///
+/// assert!(coord.is_ok());
+/// assert_eq!(coord.unwrap(), Coordinate(27, 203));
+///
+/// let coord: Result<Coordinate, Error> = "A1".try_into();
+///
+/// assert!(coord.is_ok());
+/// assert_eq!(coord.unwrap(), Coordinate(0, 0));
+///
+/// let coord: Result<Coordinate, Error> = "10".try_into();
+///
+/// assert!(coord.is_err());
+/// ```
+///
+///
+#[derive(Debug, PartialEq, Eq)]
+pub struct Coordinate {
+    ///
+    pub col: u32,
+    ///
+    pub row: u32,
+}
+
+impl Coordinate {
+    ///
+    /// docs
+    ///
+    pub fn parse_coordinate(coords: &str) -> Result<Self, crate::Error> {
+        let col_bytes = coords
+            .as_bytes()
+            .iter()
+            .enumerate()
+            .take_while(|(_, byte)| matches!(*byte, 0x41..=0x5A))
+            .collect::<Vec<(usize, &u8)>>();
+
+        if col_bytes.is_empty() {
+            return Err(Error::De(DeError::Custom(
+                "No column provided! Expected [A-Z]".to_string(),
+            )));
+        }
+
+        let row_bytes = coords
+            .as_bytes()
+            .iter()
+            .skip(col_bytes.len())
+            .enumerate()
+            .take_while(|(_, bytes)| matches!(*bytes, 0x30..=0x3A))
+            .collect::<Vec<(usize, &u8)>>();
+
+        if row_bytes.is_empty() {
+            return Err(Error::De(DeError::Custom(format!(
+                "No row provided! Expected [0-9] after: {}, at index: {}",
+                col_bytes.first().unwrap().1,
+                col_bytes.first().unwrap().0,
+            ))));
+        }
+
+        match coords
+            .as_bytes()
+            .iter()
+            .enumerate()
+            .nth(col_bytes.len() + row_bytes.len())
+        {
+            Some((index, byte)) => Err(Error::De(DeError::Custom(format!(
+                "Invalid character '{byte}' for coordinate at: {index}"
+            )))),
+            None => Ok(Coordinate {
+                col: col_bytes
+                    .iter()
+                    .map(|(index, byte)| {
+                        26_u32.pow((col_bytes.len() as u32 - 1) - *index as u32)
+                            * (**byte as u32 - 0x40)
+                    })
+                    .sum::<u32>()
+                    - 1,
+                row: row_bytes
+                    .iter()
+                    .map(|(index, byte)| {
+                        10_u32.pow(row_bytes.len() as u32 - 1 - *index as u32)
+                            * (**byte as u32 - 0x30)
+                    })
+                    .sum::<u32>()
+                    - 1,
+            }),
+        }
+    }
+
+    /// Coordinate to Excel String:
+    ///
+    /// ```rust
+    /// use calamine::{Coordinate, Error};
+    ///
+    /// let coord = Coordinate(0, 0);
+    /// assert_eq!(coord.to_excel_coordinates(), "A1");
+    ///
+    /// let coord = Coordinate(1, 1);
+    /// assert_eq!(coord.to_excel_coordinates(), "B2");
+    ///
+    /// let coord = Coordinate(26, 203);
+    /// assert_eq!(coord.to_excel_coordinates(), "AA204");
+    ///
+    /// let coord = Coordinate(51, 203);
+    /// assert_eq!(coord.to_excel_coordinates(), "AZ204");
+    ///
+    /// ```
+    pub fn to_excel_coordinates(&self) -> String {
+        struct AscendingNumberGenerator(u32);
+
+        impl Iterator for AscendingNumberGenerator {
+            type Item = u32;
+
+            fn next(&mut self) -> Option<Self::Item> {
+                if self.0 < u32::MAX {
+                    self.0 += 1;
+                    Some(self.0 - 1)
+                } else {
+                    None
+                }
+            }
+        }
+
+        let exponents = AscendingNumberGenerator(0)
+            .take_while(|exp| *exp == 0 || 26_u32.pow(*exp) <= self.col)
+            .collect::<Vec<u32>>();
+
+        let mut col =
+            exponents
+                .iter()
+                .rev()
+                .fold(("".to_string(), self.col), |(col, remainder), exp| {
+                    if *exp > 0 {
+                        let char = (((remainder / 26_u32.pow(*exp)) + 0x41) as u8 - 1) as char;
+                        (format!("{col}{char}"), remainder % 26_u32.pow(*exp))
+                    } else {
+                        let char = (((remainder / 26_u32.pow(*exp)) + 0x41) as u8) as char;
+                        (format!("{col}{char}"), 0)
+                    }
+                });
+
+        let row = self.row.to_string();
+
+        col.0.push_str(&row);
+
+        col.0
+    }
+}
+
+impl From<(u32, u32)> for Coordinate {
+    fn from(value: (u32, u32)) -> Self {
+        Self {
+            col: value.1,
+            row: value.0,
+        }
+    }
+}
+
+impl TryFrom<&str> for Coordinate {
+    type Error = crate::Error;
+
+    fn try_from(coords: &str) -> Result<Self, Self::Error> {
+        Self::parse_coordinate(coords)
+    }
+}
+
+impl Display for Coordinate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_excel_coordinates())
+    }
+}
+
+impl From<Coordinate> for (u32, u32) {
+    fn from(value: Coordinate) -> Self {
+        (value.row, value.col)
+    }
+}
+
+impl<T, I> TryFrom<(I, I)> for Range<T>
+where
+    I: Into<String>,
+    T: CellType,
+{
+    type Error = crate::Error;
+
+    fn try_from(value: (I, I)) -> Result<Self, Self::Error> {
+        let cell_1: String = value.0.into();
+        let cell_2: String = value.1.into();
+
+        Ok(Self::new(
+            Coordinate::try_from(cell_1.as_str())?.into(),
+            Coordinate::try_from(cell_2.as_str())?.into(),
+        ))
     }
 }
 
