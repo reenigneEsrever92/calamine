@@ -657,7 +657,7 @@ pub struct DataDeserializer<'a> {
     pos: (u32, u32),
 }
 
-impl<'a, 'de> serde::Deserializer<'de> for DataDeserializer<'a> {
+impl<'a, 'de> Deserializer<'de> for DataDeserializer<'a> {
     type Error = DeError;
 
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>

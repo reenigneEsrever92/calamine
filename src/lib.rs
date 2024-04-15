@@ -942,7 +942,7 @@ impl From<(u32, u32)> for Coordinate {
     fn from(value: (u32, u32)) -> Self {
         Self {
             col: value.1,
-            row: value.0,
+            row: value.0 - 1,
         }
     }
 }
