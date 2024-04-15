@@ -790,15 +790,15 @@ impl<T: CellType + fmt::Display> Range<T> {
 /// ```
 /// use calamine::{Coordinate, Error};
 ///
-/// let coord: Result<Coordinate, Error> = "AB204".try_into();
-///
-/// assert!(coord.is_ok());
-/// assert_eq!(coord.unwrap(), Coordinate{ col: 27, row: 203 });
-///
 /// let coord: Result<Coordinate, Error> = "A1".try_into();
 ///
 /// assert!(coord.is_ok());
 /// assert_eq!(coord.unwrap(), Coordinate{ col: 0, row: 0});
+///
+/// let coord: Result<Coordinate, Error> = "AC17".try_into();
+///
+/// assert!(coord.is_ok());
+/// assert_eq!(coord.unwrap(), Coordinate{ col: 28, row: 16 });
 ///
 /// let coord: Result<Coordinate, Error> = "10".try_into();
 ///
