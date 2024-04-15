@@ -784,21 +784,21 @@ impl<T: CellType + fmt::Display> Range<T> {
     }
 }
 
-///
 /// Excel String to Coordinate:
 ///
-/// ```rust
+/// # Examples
+/// ```
 /// use calamine::{Coordinate, Error};
 ///
 /// let coord: Result<Coordinate, Error> = "AB204".try_into();
 ///
 /// assert!(coord.is_ok());
-/// assert_eq!(coord.unwrap(), Coordinate(27, 203));
+/// assert_eq!(coord.unwrap(), Coordinate{ col: 27, row: 203 });
 ///
 /// let coord: Result<Coordinate, Error> = "A1".try_into();
 ///
 /// assert!(coord.is_ok());
-/// assert_eq!(coord.unwrap(), Coordinate(0, 0));
+/// assert_eq!(coord.unwrap(), Coordinate{ col: 0, row: 0});
 ///
 /// let coord: Result<Coordinate, Error> = "10".try_into();
 ///
@@ -883,16 +883,16 @@ impl Coordinate {
     /// ```rust
     /// use calamine::{Coordinate, Error};
     ///
-    /// let coord = Coordinate(0, 0);
+    /// let coord = Coordinate{ col: 0, row: 0 };
     /// assert_eq!(coord.to_excel_coordinates(), "A1");
     ///
-    /// let coord = Coordinate(1, 1);
+    /// let coord = Coordinate{ col: 1, row: 1 };
     /// assert_eq!(coord.to_excel_coordinates(), "B2");
     ///
-    /// let coord = Coordinate(26, 203);
+    /// let coord = Coordinate{ col: 26, row: 203 };
     /// assert_eq!(coord.to_excel_coordinates(), "AA204");
     ///
-    /// let coord = Coordinate(51, 203);
+    /// let coord = Coordinate{ col: 51, row: 203 };
     /// assert_eq!(coord.to_excel_coordinates(), "AZ204");
     ///
     /// ```
@@ -916,7 +916,7 @@ impl Coordinate {
             .take_while(|exp| *exp == 0 || 26_u32.pow(*exp) <= self.col)
             .collect::<Vec<u32>>();
 
-        let mut col =
+        let mut cell_string =
             exponents
                 .iter()
                 .rev()
@@ -930,11 +930,11 @@ impl Coordinate {
                     }
                 });
 
-        let row = self.row.to_string();
+        let row = (self.row + 1).to_string();
 
-        col.0.push_str(&row);
+        cell_string.0.push_str(&row);
 
-        col.0
+        cell_string.0
     }
 }
 

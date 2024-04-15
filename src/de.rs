@@ -762,7 +762,10 @@ impl<'a, 'de> serde::Deserializer<'de> for DataDeserializer<'a> {
             Data::String(ref v) => match &**v {
                 "TRUE" | "true" | "True" => visitor.visit_bool(true),
                 "FALSE" | "false" | "False" => visitor.visit_bool(false),
-                d => Err(DeError::Custom(format!("Expecting bool, got '{}'", d))),
+                d => Err(DeError::CustomPositional {
+                    message: format!("Expecting bool, got '{}'", d),
+                    pos: self.pos.into(),
+                }),
             },
             Data::Empty => visitor.visit_bool(false),
             Data::Float(v) => visitor.visit_bool(*v != 0.),
