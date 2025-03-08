@@ -1,11 +1,10 @@
 use serde::de::value::BorrowedStrDeserializer;
 use serde::de::{self, DeserializeOwned, DeserializeSeed, SeqAccess, Visitor};
 use serde::{self, forward_to_deserialize_any, Deserialize, Deserializer};
-use std::error::Error;
 use std::marker::PhantomData;
 use std::{fmt, slice, str};
 
-use crate::Coordinate;
+use crate::{Coordinate, DataType};
 
 use super::{CellErrorType, CellType, Data, Range, Rows};
 
@@ -30,16 +29,27 @@ pub enum DeError {
         pos: (u32, u32),
     },
     /// Error at position
-    Positional {
+    UnexpectedType {
         /// Cell position
         pos: Coordinate,
-        /// Cell value error
-        err: Box<dyn Error + Send + Sync>,
+        /// Type that was expected
+        expected: ExpectedType,
+        /// Actual value that was found
+        found: String,
     },
     /// Required header not found
     HeaderNotFound(String),
     /// Serde specific error
     Custom(String),
+}
+
+#[derive(Debug)]
+pub enum ExpectedType {
+    String,
+    Number,
+    Bool,
+    Char,
+    Enum(Vec<String>),
 }
 
 impl fmt::Display for DeError {
@@ -63,8 +73,16 @@ impl fmt::Display for DeError {
                 write!(f, "Cannot find header named '{}'", header)
             }
             DeError::Custom(ref s) => write!(f, "{}", s),
-            DeError::Positional { ref err, ref pos } => {
-                write!(f, "Cell error at position '{:?}': {}", pos, err)
+            DeError::UnexpectedType {
+                ref pos,
+                ref expected,
+                ref found,
+            } => {
+                write!(
+                    f,
+                    "Cell error at position '{:?}': expected: {:?}, got: {}",
+                    pos, expected, found
+                )
             }
         }
     }
@@ -622,13 +640,10 @@ macro_rules! deserialize_num {
                 Data::Float(v) => visitor.$visit(*v as $typ),
                 Data::Int(v) => visitor.$visit(*v as $typ),
                 Data::String(ref s) => {
-                    let v = s.parse().map_err(|_| DeError::Positional {
-                        err: Box::new(DeError::Custom(format!(
-                            "Expecting {}, got '{}'",
-                            stringify!($typ),
-                            s
-                        ))),
+                    let v = s.parse().map_err(|_| DeError::UnexpectedType {
                         pos: self.pos.into(),
+                        expected: ExpectedType::Number,
+                        found: s.clone(),
                     })?;
                     visitor.$visit(v)
                 }
@@ -639,10 +654,6 @@ macro_rules! deserialize_num {
                     d
                 ))),
             }
-            .map_err(|e| DeError::Positional {
-                pos: self.pos.into(),
-                err: Box::new(e),
-            })
         }
     };
 }
@@ -671,10 +682,6 @@ impl<'a, 'de> Deserializer<'de> for DataDeserializer<'a> {
             Data::DurationIso(v) => visitor.visit_str(v),
             Data::Error(ref err) => Err(DeError::CellError { err: err.clone() }),
         }
-        .map_err(|e| DeError::Positional {
-            pos: self.pos.into(),
-            err: Box::new(e),
-        })
     }
 
     #[cfg(feature = "chrono")]
@@ -698,10 +705,6 @@ impl<'a, 'de> Deserializer<'de> for DataDeserializer<'a> {
             Data::DurationIso(v) => visitor.visit_str(v),
             Data::Error(ref err) => Err(DeError::CellError { err: err.clone() }),
         }
-        .map_err(|e| DeError::Positional {
-            pos: self.pos.clone().into(),
-            err: Box::new(e),
-        })
     }
 
     #[cfg(not(feature = "chrono"))]
@@ -720,10 +723,6 @@ impl<'a, 'de> Deserializer<'de> for DataDeserializer<'a> {
             Data::DurationIso(v) => visitor.visit_str(v),
             Data::Error(ref err) => Err(DeError::CellError { err: err.clone() }),
         }
-        .map_err(|e| DeError::Positional {
-            pos: self.pos.into(),
-            err: Box::new(e),
-        })
     }
 
     fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -734,12 +733,12 @@ impl<'a, 'de> Deserializer<'de> for DataDeserializer<'a> {
             Data::String(v) => visitor.visit_bytes(v.as_bytes()),
             Data::Empty => visitor.visit_bytes(&[]),
             Data::Error(ref err) => Err(DeError::CellError { err: err.clone() }),
-            ref d => Err(DeError::Custom(format!("Expecting bytes, got {:?}", d))),
+            ref d => Err(DeError::UnexpectedType {
+                pos: self.pos.into(),
+                expected: ExpectedType::Char,
+                found: d.to_string(),
+            }),
         }
-        .map_err(|e| DeError::Positional {
-            pos: self.pos.into(),
-            err: Box::new(e),
-        })
     }
 
     fn deserialize_byte_buf<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -765,7 +764,11 @@ impl<'a, 'de> Deserializer<'de> for DataDeserializer<'a> {
             Data::String(ref v) => match &**v {
                 "TRUE" | "true" | "True" => visitor.visit_bool(true),
                 "FALSE" | "false" | "False" => visitor.visit_bool(false),
-                d => Err(DeError::Custom(format!("Expecting bool, got '{}'", d))),
+                _ => Err(DeError::UnexpectedType {
+                    pos: self.pos.into(),
+                    expected: ExpectedType::Bool,
+                    found: v.clone(),
+                }),
             },
             Data::Empty => visitor.visit_bool(false),
             Data::Float(v) => visitor.visit_bool(*v != 0.),
@@ -775,10 +778,6 @@ impl<'a, 'de> Deserializer<'de> for DataDeserializer<'a> {
             Data::DurationIso(_) => visitor.visit_bool(true),
             Data::Error(ref err) => Err(DeError::CellError { err: err.clone() }),
         }
-        .map_err(|e| DeError::Positional {
-            pos: self.pos.into(),
-            err: Box::new(e),
-        })
     }
 
     fn deserialize_char<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -790,12 +789,12 @@ impl<'a, 'de> Deserializer<'de> for DataDeserializer<'a> {
                 visitor.visit_char(s.chars().next().expect("s not empty"))
             }
             Data::Error(ref err) => Err(DeError::CellError { err: err.clone() }),
-            ref d => Err(DeError::Custom(format!("Expecting unit, got {:?}", d))),
+            ref d => Err(DeError::UnexpectedType {
+                pos: self.pos.into(),
+                expected: ExpectedType::Char,
+                found: d.to_string(),
+            }),
         }
-        .map_err(|e| DeError::Positional {
-            pos: self.pos.into(),
-            err: Box::new(e),
-        })
     }
 
     fn deserialize_unit<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -805,12 +804,12 @@ impl<'a, 'de> Deserializer<'de> for DataDeserializer<'a> {
         match self.data_type {
             Data::Empty => visitor.visit_unit(),
             Data::Error(ref err) => Err(DeError::CellError { err: err.clone() }),
-            ref d => Err(DeError::Custom(format!("Expecting unit, got {:?}", d))),
+            ref d => Err(DeError::UnexpectedType {
+                pos: self.pos.into(),
+                expected: ExpectedType::Char,
+                found: d.to_string(),
+            }),
         }
-        .map_err(|e| DeError::Positional {
-            pos: self.pos.into(),
-            err: Box::new(e),
-        })
     }
 
     fn deserialize_option<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -848,12 +847,12 @@ impl<'a, 'de> Deserializer<'de> for DataDeserializer<'a> {
         match self.data_type {
             Data::String(s) => visitor.visit_enum(s.as_str().into_deserializer()),
             Data::Error(ref err) => Err(DeError::CellError { err: err.clone() }),
-            ref d => Err(DeError::Custom(format!("Expecting enum, got {:?}", d))),
+            ref d => Err(DeError::UnexpectedType {
+                pos: self.pos.into(),
+                expected: ExpectedType::Char,
+                found: d.to_string(),
+            }),
         }
-        .map_err(|e| DeError::Positional {
-            pos: self.pos.into(),
-            err: Box::new(e),
-        })
     }
 
     deserialize_num!(i64, deserialize_i64, visit_i64);
