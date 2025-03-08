@@ -84,7 +84,9 @@ use std::path::Path;
 
 pub use crate::auto::{open_workbook_auto, open_workbook_auto_from_rs, Sheets};
 pub use crate::datatype::{Data, DataRef, DataType, ExcelDateTime, ExcelDateTimeType};
-pub use crate::de::{DeError, RangeDeserializer, RangeDeserializerBuilder, ToCellDeserializer};
+pub use crate::de::{
+    DeError, ExpectedType, RangeDeserializer, RangeDeserializerBuilder, ToCellDeserializer,
+};
 pub use crate::errors::Error;
 pub use crate::ods::{Ods, OdsError};
 pub use crate::xls::{Xls, XlsError, XlsOptions};
@@ -806,7 +808,7 @@ impl<T: CellType + fmt::Display> Range<T> {
 /// ```
 ///
 ///
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Coordinate {
     ///
     pub col: u32,

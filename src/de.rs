@@ -4,7 +4,7 @@ use serde::{self, forward_to_deserialize_any, Deserialize, Deserializer};
 use std::marker::PhantomData;
 use std::{fmt, slice, str};
 
-use crate::{Coordinate, DataType};
+use crate::Coordinate;
 
 use super::{CellErrorType, CellType, Data, Range, Rows};
 
@@ -43,12 +43,18 @@ pub enum DeError {
     Custom(String),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+/// Type that was expected
 pub enum ExpectedType {
+    /// String type
     String,
+    /// Number type
     Number,
+    /// Bool type
     Bool,
+    /// Char type
     Char,
+    /// Enum type
     Enum(Vec<String>),
 }
 
